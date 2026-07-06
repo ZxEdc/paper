@@ -267,6 +267,14 @@ Before publishing or making a release:
 - Confirm no private IPs, API keys, access tokens, or local absolute paths are present.
 - Add a project license before public release.
 
+## Authors
+
+LEGALWORLD is developed by Songhan Zuo, Shengbin Yue, Tao Chiang, Guanying Li, Yun Song, Xuanjing Huang, and Zhongyu Wei.
+
+## Acknowledgements
+
+We especially thank Beijia Guan for her valuable suggestions on this project.
+
 ## Citation
 
 ```bibtex
