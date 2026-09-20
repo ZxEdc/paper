@@ -147,25 +147,29 @@ def evaluate_stard(cfg: AppConfig, corpus_path: str, queries_path: str, topks: I
 # trace 结果的答案质量评测
 # ------------------------------------------------------------------ #
 def evaluate_traces(trace_path: str, dataset_path: str) -> Dict:
-    """对 runner 输出的 trace 计算答案质量（ROUGE-L + 引用命中率）。"""
+    """对 trace（baseline 或 runner 输出）计算答案质量（ROUGE-L + 引用命中率）。"""
     dialogues = {d["id"]: d for d in load_dialogues(dataset_path)}
-    scores, citation_hits = [], []
+    scores: List[float] = []
+    cited = 0
+    n_answers = 0
     with Path(trace_path).open("r", encoding="utf-8") as f:
         for line in f:
             r = json.loads(line)
-            gold = dialogues.get(r.get("id"), {})
-            ref = gold.get("answer", "")
+            ref = dialogues.get(r.get("id"), {}).get("answer", "")
             if not ref:
                 continue
             for rec in r.get("records", []):
-                scores.append(rouge_l(rec["assistant"], ref))
-            ans_list = [rec["assistant"] for rec in r.get("records", [])]
-            citation_hits.extend(
-                citation_hit_rate(ans_list, [ref] * len(ans_list)) * (1 if ans_list else 0) for _ in [0]
-            ) if ans_list else None
+                ans = rec.get("assistant", "")
+                if not ans:
+                    continue
+                n_answers += 1
+                scores.append(rouge_l(ans, ref))
+                if citation_hit_rate([ans], [ref]) > 0:
+                    cited += 1
     return {
         "rouge_l": round(float(np.mean(scores)), 4) if scores else None,
-        "num_turns": len(scores),
+        "citation_hit_rate": round(cited / n_answers, 4) if n_answers else None,
+        "num_answers": n_answers,
     }
 
 
