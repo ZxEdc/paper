@@ -1,0 +1,9 @@
+# legal_qa 依赖（服务器端 Python >= 3.10）
+agentscope>=2.0.0
+numpy>=1.24
+requests>=2.31
+tqdm>=4.66
+# vLLM 客户端依赖（openai 兼容请求由 requests 直接发送，无需 openai 包）
+# 可选评测依赖（按需安装）：
+# bert-score
+# jieba
