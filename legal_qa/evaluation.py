@@ -22,7 +22,7 @@ from typing import Dict, Iterable, List, Sequence, Set, Tuple
 import numpy as np
 
 from .config import AppConfig
-from .data_loaders import load_dialogues, load_law_corpus
+from .data_loaders import cn_to_int, load_dialogues, load_law_corpus
 from .llm import EmbeddingClient
 from .retrieval import LawIndex, build_or_load_index
 
@@ -55,16 +55,25 @@ def ndcg_at_k(ranked_ids: Sequence[str], gold: Set[str], k: int) -> float:
 # ------------------------------------------------------------------ #
 # 引用命中率：从生成文本中抽取 《法律名》第X条 引用
 # ------------------------------------------------------------------ #
-CITE_PATTERN = re.compile(r"《([^《》]{1,40}?)》[^。；]{0,12}?第([一二三四五六七八九十百零\d]+)条")
+CITE_PATTERN = re.compile(r"《([^《》]{1,40}?)》[^。；]{0,12}?第([一二三四五六七八九十百千零两\d]+)条")
 
 
 def extract_citations(text: str) -> List[str]:
-    """抽取引用对 (法律名, 条序号) -> '法律名#条序号'。"""
-    return [f"{name}#{num}" for name, num in CITE_PATTERN.findall(text)]
+    """抽取引用对 (法律名, 条序号) -> '法律名#条序号'（数字已归一化）。"""
+    return [f"{name}#{cn_to_int(num)}" for name, num in CITE_PATTERN.findall(text)]
+
+
+def citations_match(a: str, g: str) -> bool:
+    """两条引用是否等价：条号相等且法名互为包含（'民法典#839' vs '中华人民共和国民法典#839'）。"""
+    an, _, anum = a.partition("#")
+    gn, _, gnum = g.partition("#")
+    if anum != gnum or not anum:
+        return False
+    return an == gn or an in gn or gn in an
 
 
 def citation_hit_rate(answers: Sequence[str], gold_texts: Sequence[str]) -> float:
-    """简单引用命中率：答案中的引用是否出现在参考答案中（文本级近似）。"""
+    """引用命中率：答案抽取的引用（归一化）与参考答案抽取的引用有交集的比例。"""
     if not answers:
         return 0.0
     hits = 0
@@ -72,7 +81,8 @@ def citation_hit_rate(answers: Sequence[str], gold_texts: Sequence[str]) -> floa
         cites = extract_citations(ans)
         if not cites:
             continue
-        if any(c in ref for c in cites):
+        gold_cites = set(extract_citations(ref))
+        if gold_cites and any(c in gold_cites for c in cites):
             hits += 1
     return hits / len(answers)
 
@@ -147,7 +157,11 @@ def evaluate_stard(cfg: AppConfig, corpus_path: str, queries_path: str, topks: I
 # trace 结果的答案质量评测
 # ------------------------------------------------------------------ #
 def evaluate_traces(trace_path: str, dataset_path: str) -> Dict:
-    """对 trace（baseline 或 runner 输出）计算答案质量（ROUGE-L + 引用命中率）。"""
+    """对 trace（baseline 或 runner 输出）计算答案质量（ROUGE-L + 引用命中率）。
+
+    引用命中率优先使用数据集 gold 引用（match_name 解析），
+    无 gold 引用时退化为与参考答案文本比对。
+    """
     dialogues = {d["id"]: d for d in load_dialogues(dataset_path)}
     scores: List[float] = []
     cited = 0
@@ -155,16 +169,21 @@ def evaluate_traces(trace_path: str, dataset_path: str) -> Dict:
     with Path(trace_path).open("r", encoding="utf-8") as f:
         for line in f:
             r = json.loads(line)
-            ref = dialogues.get(r.get("id"), {}).get("answer", "")
-            if not ref:
-                continue
+            gold = dialogues.get(r.get("id"), {})
+            ref = gold.get("answer", "")
+            gold_cites = gold.get("gold_citations") or []
             for rec in r.get("records", []):
                 ans = rec.get("assistant", "")
                 if not ans:
                     continue
                 n_answers += 1
-                scores.append(rouge_l(ans, ref))
-                if citation_hit_rate([ans], [ref]) > 0:
+                if ref:
+                    scores.append(rouge_l(ans, ref))
+                cites = extract_citations(ans)
+                if gold_cites:
+                    if any(citations_match(c, g) for c in cites for g in gold_cites):
+                        cited += 1
+                elif ref and citation_hit_rate([ans], [ref]) > 0:
                     cited += 1
     return {
         "rouge_l": round(float(np.mean(scores)), 4) if scores else None,
