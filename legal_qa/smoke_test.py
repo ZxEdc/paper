@@ -134,7 +134,7 @@ def test_metrics() -> None:
     check("rouge_l完全一致", rouge_l("劳动合同", "劳动合同") == 1.0)
     check("rouge_l部分", 0.0 < rouge_l("劳动合同纠纷", "劳动争议") < 1.0)
     cites = extract_citations("依据《民法典》第六百七十五条，借款人应当按照约定的期限返还借款。")
-    check("引用抽取", cites == ["民法典#六百七十五"])
+    check("引用抽取", cites == ["民法典#675"])
 
 
 def test_agent_wiring() -> None:
